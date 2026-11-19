@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # sin __pycache__ dentro de bin/
+
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin"
 

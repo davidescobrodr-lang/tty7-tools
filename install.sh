@@ -6,6 +6,7 @@ src="$(cd "$(dirname "$0")/bin" && pwd)"
 dest="$HOME/.local/bin"
 mkdir -p "$dest"
 for f in "$src"/*; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
     name="$(basename "$f")"
     target="$dest/$name"
     if [ -e "$target" ] && [ ! -L "$target" ]; then
