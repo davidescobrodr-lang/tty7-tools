@@ -70,10 +70,14 @@ def main(argv=None):
     p.add_argument("--base", help="commit de partida (por defecto: .tty7-tareas/base)")
     a = p.parse_args(argv)
 
+    cwd = os.getcwd()
+    # En un repo, .tty7-tareas/ va en la raíz del worktree, aunque el worker esté en un subdirectorio.
+    os.chdir(git("rev-parse", "--show-toplevel") or cwd)
+
     data = {"outcome": a.outcome, "summary": a.summary}
     data.update(collect(read_base(a.base)))
     data["claude_config_dir"] = os.environ.get("CLAUDE_CONFIG_DIR")
-    data["cwd"] = os.getcwd()
+    data["cwd"] = cwd
     data["time"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     if data["dirty"]:

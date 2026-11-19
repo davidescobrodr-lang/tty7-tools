@@ -66,6 +66,13 @@ class Tty7Run(unittest.TestCase):
         self.assertEqual(self.r("add", rid[:10], "t1").returncode, 0)
         self.assertIn("t1", self.data(rid)["tasks"])
 
+    def test_empty_run_id_refused(self):
+        rid = self.r("new", "unica").stdout.strip()
+        r = self.r("add", "", "t1")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("vacío", r.stderr)
+        self.assertEqual(self.data(rid)["tasks"], {})
+
     def test_ambiguous_prefix(self):
         a = self.r("new", "uno").stdout.strip()
         time.sleep(1.1)

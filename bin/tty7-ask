@@ -8,6 +8,7 @@ Coordinador:  tty7-ask --show <dir>
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -31,8 +32,17 @@ def question_path(base):
     return Path(base) / TAREAS / "pregunta.json"
 
 
+def worktree_root():
+    """Raíz del repo git actual, o el directorio actual fuera de un repo."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    except OSError:
+        return "."
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "."
+
+
 def ask(question, options):
-    path = question_path(".")
+    path = question_path(worktree_root())
     if path.exists():
         print(f"error: ya hay una pregunta abierta en {path.resolve()}", file=sys.stderr)
         return 2

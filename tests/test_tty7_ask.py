@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,16 @@ class Tty7Ask(unittest.TestCase):
         self.assertEqual(d["cwd"], str(self.dir.resolve()))
         self.assertIn("time", d)
         self.assertIn("Termina tu turno", r.stdout)
+
+    def test_ask_from_subdirectory_uses_repo_root(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.dir, check=True)
+        sub = self.dir / "sub"
+        sub.mkdir()
+        r = run("tty7-ask", "¿Sigo?", cwd=sub)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.q.exists())
+        self.assertFalse((sub / ".tty7-tareas").exists())
+        self.assertEqual(run("tty7-ask", "--show", str(self.dir)).returncode, 0)
 
     def test_ask_without_options(self):
         run("tty7-ask", "¿Sigo?", cwd=self.dir)

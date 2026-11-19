@@ -81,6 +81,21 @@ class Tty7Done(unittest.TestCase):
         run("tty7-done", "--outcome", "succeeded", "--summary", "x", cwd=self.dir)
         self.assertFalse(result(self.dir)["dirty"])
 
+    def test_from_subdirectory_uses_repo_root(self):
+        base = make_repo(self.dir)
+        (Path(self.dir) / ".tty7-tareas").mkdir()
+        (Path(self.dir) / ".tty7-tareas" / "base").write_text(base + "\n")
+        sub = Path(self.dir) / "sub"
+        sub.mkdir()
+        (Path(self.dir) / "base.txt").write_text("cambio fuera de sub")
+        r = run("tty7-done", "--outcome", "succeeded", "--summary", "x", cwd=sub)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((sub / ".tty7-tareas").exists())
+        d = result(self.dir)
+        self.assertEqual(d["base"], base)
+        self.assertEqual(d["files_changed"], ["a.txt"])
+        self.assertTrue(d["dirty"])
+
     def test_config_dir_recorded(self):
         run("tty7-done", "--outcome", "succeeded", "--summary", "x", cwd=self.dir,
             env={"CLAUDE_CONFIG_DIR": "/x"})
