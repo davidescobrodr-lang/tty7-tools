@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Entrega del worker: escribe .tty7-tareas/resultado.json en el directorio actual.
+
+Uso: tty7-done --outcome succeeded|failed --summary "<texto>" [--base <ref>]
+Ejecútalo al final, después del commit.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+TAREAS = ".tty7-tareas"
+
+
+def git(*args):
+    """Ejecuta git en el directorio actual. Devuelve stdout, o None si falla."""
+    try:
+        r = subprocess.run(["git", *args], capture_output=True, text=True)
+    except OSError:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def write_json(path, data):
+    """Escritura atómica: temporal en el mismo directorio + os.replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def read_base(arg):
+    if arg:
+        return arg
+    try:
+        return (Path(TAREAS) / "base").read_text().strip() or None
+    except OSError:
+        return None
+
+
+def collect(base):
+    """Datos de git. Todo en None si el directorio no es un repo."""
+    if git("rev-parse", "--is-inside-work-tree") != "true":
+        return {"branch": None, "commit": None, "base": base, "files_changed": None, "dirty": False}
+    if base:
+        diff = git("diff", "--name-only", f"{base}...HEAD")
+    else:
+        diff = git("diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "HEAD")
+    status = git("status", "--porcelain", "--", ".", f":(exclude){TAREAS}") or ""
+    return {
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "commit": git("rev-parse", "HEAD"),
+        "base": base,
+        "files_changed": [l for l in (diff or "").splitlines() if l],
+        "dirty": bool(status.strip()),
+    }
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="tty7-done", description="Entrega estructurada del worker.")
+    p.add_argument("--outcome", required=True, choices=["succeeded", "failed"])
+    p.add_argument("--summary", required=True, help="qué hiciste, qué encontraste, qué falta")
+    p.add_argument("--base", help="commit de partida (por defecto: .tty7-tareas/base)")
+    a = p.parse_args(argv)
+
+    data = {"outcome": a.outcome, "summary": a.summary}
+    data.update(collect(read_base(a.base)))
+    data["claude_config_dir"] = os.environ.get("CLAUDE_CONFIG_DIR")
+    data["cwd"] = os.getcwd()
+    data["time"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    if data["dirty"]:
+        print("aviso: hay cambios sin commit. Haz commit y ejecuta tty7-done otra vez.",
+              file=sys.stderr)
+    path = Path(TAREAS) / "resultado.json"
+    write_json(path, data)
+    print(path.resolve())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
