@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Canal de preguntas entre el worker y el coordinador.
+
+Worker:       tty7-ask "<pregunta>" [--options "a,b"]
+Coordinador:  tty7-ask --show <dir>
+              tty7-ask --close <dir> --answer "<texto>"
+"""
+import argparse
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+TAREAS = ".tty7-tareas"
+
+
+def write_json(path, data):
+    """Escritura atómica: temporal en el mismo directorio + os.replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def question_path(base):
+    return Path(base) / TAREAS / "pregunta.json"
+
+
+def ask(question, options):
+    path = question_path(".")
+    if path.exists():
+        print(f"error: ya hay una pregunta abierta en {path.resolve()}", file=sys.stderr)
+        return 2
+    write_json(path, {
+        "question": question,
+        "options": [o.strip() for o in (options or "").split(",") if o.strip()],
+        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cwd": os.getcwd(),
+    })
+    print("Pregunta guardada. Termina tu turno: el coordinador responde en esta pane.")
+    return 0
+
+
+def show(base):
+    path = question_path(base)
+    if not path.exists():
+        print("Sin pregunta abierta.")
+        return 1
+    d = json.loads(path.read_text(encoding="utf-8"))
+    print(d["question"])
+    if d.get("options"):
+        print("Opciones: " + ", ".join(d["options"]))
+    return 0
+
+
+def close(base, answer):
+    path = question_path(base)
+    if not path.exists():
+        print(f"error: Sin pregunta abierta en {Path(base).resolve()}", file=sys.stderr)
+        return 2
+    d = json.loads(path.read_text(encoding="utf-8"))
+    d["answer"] = answer
+    d["answered"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = d.get("time", d["answered"]).replace(":", "")
+    dest = Path(base) / TAREAS / "preguntas" / f"{stamp}.json"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = dest.with_name(f"{stamp}-{n}.json")
+    write_json(dest, d)
+    path.unlink()
+    print(dest)
+    return 0
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="tty7-ask", description="Preguntas worker → coordinador.")
+    p.add_argument("question", nargs="?", help="la pregunta (worker)")
+    p.add_argument("--options", help="opciones separadas por comas")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--show", metavar="DIR", help="muestra la pregunta abierta de DIR")
+    g.add_argument("--close", metavar="DIR", help="cierra la pregunta de DIR con --answer")
+    p.add_argument("--answer", help="respuesta (con --close)")
+    a = p.parse_args(argv)
+
+    if a.show:
+        return show(a.show)
+    if a.close:
+        if a.answer is None:
+            p.error("--close necesita --answer")
+        return close(a.close, a.answer)
+    if not a.question:
+        p.error("falta la pregunta")
+    return ask(a.question, a.options)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
