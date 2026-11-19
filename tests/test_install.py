@@ -14,7 +14,9 @@ class Install(unittest.TestCase):
 
     def test_links_only_executable_files(self):
         with tempfile.TemporaryDirectory() as home:
-            (ROOT / "bin" / "__pycache__").mkdir(exist_ok=True)
+            cache = ROOT / "bin" / "__pycache__"
+            cache.mkdir(exist_ok=True)
+            self.addCleanup(cache.rmdir)
             self.run_install(home)
             names = sorted(os.listdir(Path(home) / ".local/bin"))
             self.assertNotIn("__pycache__", names)
