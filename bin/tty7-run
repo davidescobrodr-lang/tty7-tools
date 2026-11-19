@@ -62,6 +62,8 @@ def resolve(prefix):
         if not ids:
             return None
         return ids[-1]
+    if not prefix.strip():
+        raise Error("id de corrida vacío. Escribe el id que imprimió `tty7-run new`.")
     matches = [i for i in ids if i.startswith(prefix)]
     if not matches:
         raise Error(f"no existe la corrida {prefix!r}")
