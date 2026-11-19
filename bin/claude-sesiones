@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Lista las sesiones de Claude Code de las dos cuentas y su comando de resume.
+
+Uso: claude-sesiones [texto] [--aqui] [--cuenta david|trabajo] [-n N] [-v] [--json]
+"""
+import argparse
+import json
+import os
+import shlex
+import sys
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path.home()
+# (cuenta, carpeta de configuración, comando para reanudar)
+ACCOUNTS = [
+    ("david", HOME / ".claude-david", "claude-david"),
+    ("trabajo", HOME / ".claude", "claude"),
+]
+NO_PROMPT = "(sin prompt)"
+
+
+def _prompt_text(content):
+    """Devuelve el texto de un mensaje de usuario real, o None."""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts = [c.get("text", "") for c in content
+                 if isinstance(c, dict) and c.get("type") == "text"]
+        if not parts:
+            return None
+        text = "\n".join(parts)
+    else:
+        return None
+    text = text.strip()
+    if not text or text.startswith("<"):
+        return None
+    return text
+
+
+def parse_session(path):
+    """Lee un .jsonl de sesión. Devuelve dict con id, cwd, start, end, title, prompt."""
+    path = Path(path)
+    cwd = None
+    stamps = []
+    ai_title = None
+    prompt = None
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(d, dict):
+                continue
+            kind = d.get("type")
+            if kind == "ai-title" and d.get("aiTitle"):
+                ai_title = d["aiTitle"]
+            ts = d.get("timestamp")
+            if isinstance(ts, str):
+                stamps.append(ts)
+            if cwd is None and isinstance(d.get("cwd"), str):
+                cwd = d["cwd"]
+            if kind == "user" and prompt is None and not d.get("isMeta"):
+                prompt = _prompt_text((d.get("message") or {}).get("content"))
+    if not stamps:
+        return None
+    return {
+        "id": path.stem,
+        "cwd": cwd,
+        "start": min(stamps),
+        "end": max(stamps),
+        "title": ai_title or prompt or NO_PROMPT,
+        "prompt": prompt,
+    }
+
+
+def resume_command(account_cmd, session):
+    cmd = f"{account_cmd} --resume {session['id']}"
+    if session.get("cwd"):
+        return f"cd {shlex.quote(session['cwd'])} && {cmd}"
+    return cmd
+
+
+def list_sessions(roots=None, account=None):
+    """Lee todas las sesiones. roots: lista de (cuenta, carpeta, comando)."""
+    out = []
+    for name, root, cmd in roots or ACCOUNTS:
+        if account and name != account:
+            continue
+        for path in Path(root).glob("projects/*/*.jsonl"):
+            s = parse_session(path)
+            if s:
+                s["account"] = name
+                s["resume"] = resume_command(cmd, s)
+                out.append(s)
+    return out
+
+
+def select(sessions, text=None, here=None):
+    """Filtra por texto (sin mayúsculas) y carpeta. Ordena por fin, más reciente primero."""
+    res = sessions
+    if text:
+        t = text.lower()
+        res = [s for s in res
+               if any(t in (s.get(k) or "").lower() for k in ("title", "prompt", "cwd"))]
+    if here:
+        res = [s for s in res if s.get("cwd") == here]
+    return sorted(res, key=lambda s: s.get("end") or "", reverse=True)
+
+
+def _local(ts):
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return ts[:16]
+
+
+def _short(path):
+    if not path:
+        return "?"
+    home = str(HOME)
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="claude-sesiones",
+                                description="Sesiones de Claude Code de las dos cuentas.")
+    p.add_argument("texto", nargs="?", help="filtra por título, prompt o carpeta")
+    p.add_argument("--aqui", action="store_true", help="solo sesiones de la carpeta actual")
+    p.add_argument("--cuenta", choices=[a[0] for a in ACCOUNTS])
+    p.add_argument("-n", type=int, default=20, help="cantidad máxima (por defecto 20)")
+    p.add_argument("-v", action="store_true", help="muestra el comando de resume")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+
+    rows = select(list_sessions(account=a.cuenta), a.texto, os.getcwd() if a.aqui else None)[: a.n]
+    if a.json:
+        json.dump(rows, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return 0
+    if not rows:
+        print("Sin sesiones.")
+        return 1
+    for s in rows:
+        title = s["title"].replace("\n", " ")
+        if len(title) > 60:
+            title = title[:59] + "…"
+        print(f"{_local(s['end'])}  {s['account']:<7}  {_short(s['cwd']):<40}  {title}")
+        if a.v:
+            print(f"    {s['resume']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
