@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Registro de corridas de workers de tty7.
+
+  tty7-run new "<objetivo>"                       crea una corrida, imprime su id
+  tty7-run add <run> <task> [--pane %N] [--worktree P] [--branch B]
+  tty7-run set <run> <task> --status <estado> [--note "..."]
+  tty7-run show [<run>] [--json]                  sin <run>: la más reciente
+  tty7-run ls
+
+<run> acepta un prefijo único del id. Datos: $TTY7_RUNS_DIR o ~/.local/state/tty7-runs/
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import tempfile
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+
+STATUSES = ["pendiente", "trabajando", "pregunta", "terminada", "fallida", "cerrada"]
+
+
+class Error(Exception):
+    """Error de uso: se imprime y sale con código 2."""
+
+
+def runs_dir():
+    d = Path(os.environ.get("TTY7_RUNS_DIR") or Path.home() / ".local/state/tty7-runs")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def write_json(path, data):
+    """Escritura atómica: temporal en el mismo directorio + os.replace."""
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def slug(text):
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return s[:30].strip("-") or "corrida"
+
+
+def all_runs():
+    return sorted(p.stem for p in runs_dir().glob("*.json"))
+
+
+def resolve(prefix):
+    """Id completo a partir de un prefijo. None = la corrida más reciente."""
+    ids = all_runs()
+    if prefix is None:
+        if not ids:
+            return None
+        return ids[-1]
+    matches = [i for i in ids if i.startswith(prefix)]
+    if not matches:
+        raise Error(f"no existe la corrida {prefix!r}")
+    if len(matches) > 1:
+        raise Error(f"prefijo ambiguo {prefix!r}: {', '.join(matches)}")
+    return matches[0]
+
+
+def load(run_id):
+    return json.loads((runs_dir() / f"{run_id}.json").read_text(encoding="utf-8"))
+
+
+def save(data):
+    write_json(runs_dir() / f"{data['id']}.json", data)
+
+
+def cmd_new(a):
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_id = f"{stamp}-{slug(a.objective)}"
+    if (runs_dir() / f"{run_id}.json").exists():
+        raise Error(f"la corrida {run_id} ya existe. Espera un segundo y repite.")
+    save({"id": run_id, "objective": a.objective, "created": now(), "tasks": {}})
+    print(run_id)
+
+
+def cmd_add(a):
+    data = load(resolve(a.run))
+    if a.task in data["tasks"]:
+        raise Error(f"la tarea {a.task!r} ya existe en {data['id']}")
+    data["tasks"][a.task] = {"pane": a.pane, "worktree": a.worktree, "branch": a.branch,
+                             "status": "pendiente", "updated": now(), "note": None}
+    save(data)
+
+
+def cmd_set(a):
+    data = load(resolve(a.run))
+    task = data["tasks"].get(a.task)
+    if task is None:
+        raise Error(f"no existe la tarea {a.task!r} en {data['id']}")
+    task["status"] = a.status
+    if a.note is not None:
+        task["note"] = a.note
+    task["updated"] = now()
+    save(data)
+
+
+def cmd_show(a):
+    run_id = resolve(a.run)
+    if run_id is None:
+        print("Sin corridas.")
+        return 1
+    data = load(run_id)
+    if a.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(f"{data['id']}  {data['objective']}")
+    if not data["tasks"]:
+        print("  (sin tareas)")
+    for name, t in data["tasks"].items():
+        print(f"  {name:<16} {t['status']:<11} {t.get('pane') or '-':<6} "
+              f"{t.get('branch') or '-':<24} {t.get('note') or ''}")
+    return 0
+
+
+def cmd_ls(a):
+    ids = all_runs()
+    if not ids:
+        print("Sin corridas.")
+        return 1
+    for run_id in ids:
+        data = load(run_id)
+        counts = Counter(t["status"] for t in data["tasks"].values())
+        summary = ", ".join(f"{s}: {counts[s]}" for s in STATUSES if counts[s]) or "sin tareas"
+        print(f"{run_id}  {data['objective']}  ({summary})")
+    return 0
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="tty7-run", description="Registro de corridas de workers.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("new", help="crea una corrida")
+    s.add_argument("objective")
+    s.set_defaults(fn=cmd_new)
+    s = sub.add_parser("add", help="agrega una tarea")
+    s.add_argument("run")
+    s.add_argument("task")
+    s.add_argument("--pane")
+    s.add_argument("--worktree")
+    s.add_argument("--branch")
+    s.set_defaults(fn=cmd_add)
+    s = sub.add_parser("set", help="cambia el estado de una tarea")
+    s.add_argument("run")
+    s.add_argument("task")
+    s.add_argument("--status", required=True, choices=STATUSES)
+    s.add_argument("--note")
+    s.set_defaults(fn=cmd_set)
+    s = sub.add_parser("show", help="muestra una corrida")
+    s.add_argument("run", nargs="?")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_show)
+    s = sub.add_parser("ls", help="lista las corridas")
+    s.set_defaults(fn=cmd_ls)
+    a = p.parse_args(argv)
+    try:
+        return a.fn(a) or 0
+    except Error as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
