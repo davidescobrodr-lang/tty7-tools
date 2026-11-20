@@ -72,7 +72,7 @@ class Tty7Cmd(unittest.TestCase):
         r = self.cmd("git", "status")
         self.assertEqual(r.returncode, 0, r.stderr)
         calls = self.fake()["calls"]
-        self.assertIn(["split", "%101", "--v"], calls)
+        self.assertIn(["split", "%101", "--h"], calls)
         ex = self.execs()
         self.assertEqual(ex[0][-1], "true")  # calentamiento
         self.assertEqual(ex[-1][1], "%200")
@@ -104,7 +104,7 @@ class Tty7Cmd(unittest.TestCase):
         self.save(d)
         self.env["TTY7_PANE"] = "%102"
         self.cmd("ls")
-        self.assertIn(["split", "%102", "--v"], self.fake()["calls"])
+        self.assertIn(["split", "%102", "--h"], self.fake()["calls"])
 
     def test_warmup_retries_until_ready(self):
         d = self.fake()

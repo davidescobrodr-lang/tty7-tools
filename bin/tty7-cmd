@@ -4,8 +4,8 @@
 Uso: tty7-cmd [--timeout S] [--cwd DIR] [--] <comando...>
      tty7-cmd --close
 
-El pane de comandos está debajo de tu pane ($TTY7_PANE). Si el pane ya existe y está vivo,
-tty7-cmd lo reusa. Si no, abre uno (tty7 split --v) y espera a que el shell responda.
+El pane de comandos está a la derecha de tu pane ($TTY7_PANE). Si el pane ya existe y está vivo,
+tty7-cmd lo reusa. Si no, abre uno (tty7 split --h) y espera a que el shell responda.
 Cada comando corre como "cd <DIR> && <comando>". DIR es el directorio actual por defecto.
 Para comandos interactivos o que no terminan (servidores), usa tty7 send + tty7 wait.
 """
@@ -76,7 +76,7 @@ def get_pane(owner):
     saved = read_saved(path)
     if saved and is_live(saved):
         return saved
-    r = tty7("split", owner, "--v")
+    r = tty7("split", owner, "--h")
     if r.returncode != 0 or not r.stdout.strip():
         print(f"error: no pude abrir el pane de comandos: {r.stderr.strip()}", file=sys.stderr)
         sys.exit(2)
