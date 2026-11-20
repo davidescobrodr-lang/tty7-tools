@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Ejecuta un comando en un pane de comandos visible y devuelve su salida y su código.
+
+Uso: tty7-cmd [--timeout S] [--cwd DIR] [--] <comando...>
+     tty7-cmd --close
+
+El pane de comandos está debajo de tu pane ($TTY7_PANE). Si el pane ya existe y está vivo,
+tty7-cmd lo reusa. Si no, abre uno (tty7 split --v) y espera a que el shell responda.
+Cada comando corre como "cd <DIR> && <comando>". DIR es el directorio actual por defecto.
+Para comandos interactivos o que no terminan (servidores), usa tty7 send + tty7 wait.
+"""
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+WARMUP_TRIES = 20
+
+
+def state_dir():
+    d = os.environ.get("TTY7_CMD_STATE_DIR")
+    if d:
+        return Path(d)
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "tty7-cmd"
+
+
+def pane_id(value):
+    """'101' o '%101' -> '%101'."""
+    return "%" + value.strip().lstrip("%")
+
+
+def tty7(*args, capture=True):
+    try:
+        return subprocess.run(["tty7", *args], capture_output=capture, text=True)
+    except OSError as e:
+        print(f"error: no pude ejecutar tty7: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+def is_live(pane):
+    r = tty7("pane", "ls", "--json")
+    if r.returncode != 0:
+        return False
+    try:
+        panes = json.loads(r.stdout).get("panes", [])
+    except (ValueError, AttributeError):
+        return False
+    return any(pane_id(str(p.get("pane", ""))) == pane and p.get("live") for p in panes)
+
+
+def read_saved(path):
+    try:
+        return path.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def warm_up(pane):
+    """El primer exec en un pane nuevo falla aunque corre. Repite 'true' hasta que responda."""
+    pause = float(os.environ.get("TTY7_CMD_SLEEP", "0.5"))
+    for _ in range(WARMUP_TRIES):
+        if tty7("exec", pane, "--timeout", "5", "--", "true").returncode == 0:
+            return True
+        time.sleep(pause)
+    return False
+
+
+def get_pane(owner):
+    """Pane de comandos de owner: el guardado si está vivo, o uno nuevo."""
+    path = state_dir() / owner.lstrip("%")
+    saved = read_saved(path)
+    if saved and is_live(saved):
+        return saved
+    r = tty7("split", owner, "--v")
+    if r.returncode != 0 or not r.stdout.strip():
+        print(f"error: no pude abrir el pane de comandos: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(2)
+    pane = pane_id(r.stdout.strip().splitlines()[-1])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(pane + "\n")
+    if not warm_up(pane):
+        print(f"error: el shell del pane {pane} no respondió. Revisa el pane.", file=sys.stderr)
+        sys.exit(2)
+    return pane
+
+
+def close(owner):
+    path = state_dir() / owner.lstrip("%")
+    saved = read_saved(path)
+    if saved and is_live(saved):
+        tty7("pane", "close", saved)
+        print(f"Cerrado: {saved}")
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return 0
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="tty7-cmd", description="Comando en un pane visible.")
+    p.add_argument("--timeout", type=int, default=600, help="segundos (por defecto 600)")
+    p.add_argument("--cwd", help="directorio del comando (por defecto el actual)")
+    p.add_argument("--close", action="store_true", help="cierra el pane de comandos")
+    p.add_argument("command", nargs=argparse.REMAINDER)
+    a = p.parse_args(argv)
+
+    owner = os.environ.get("TTY7_PANE", "").strip()
+    if not owner:
+        print("error: TTY7_PANE no existe. tty7-cmd solo funciona dentro de un pane de tty7.",
+              file=sys.stderr)
+        return 2
+    owner = pane_id(owner)
+    if a.close:
+        return close(owner)
+
+    words = a.command[1:] if a.command[:1] == ["--"] else a.command
+    if not words:
+        print("error: falta el comando.", file=sys.stderr)
+        return 2
+    line = f"cd {shlex.quote(a.cwd or os.getcwd())} && {' '.join(words)}"
+    pane = get_pane(owner)
+    sys.stdout.flush()
+    return tty7("exec", pane, "--timeout", str(a.timeout), "--", line, capture=False).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
