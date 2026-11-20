@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Lista las sesiones de Claude Code de las dos cuentas y su comando de resume.
 
-Uso: claude-sesiones [texto] [--aqui] [--cuenta david|trabajo] [-n N] [-v] [--json]
+Uso: claude-sesiones [texto] [--aqui] [--cuenta david|trabajo] [-n N] [-v] [--todas] [--json]
+Oculta las sesiones de /tmp (workers y pruebas). --todas las muestra.
 """
 import argparse
 import json
@@ -103,11 +104,18 @@ def _mtime(item):
         return 0
 
 
-def list_sessions(roots=None, account=None, limit=None):
+def is_tmp(session):
+    """True si la sesión corrió dentro de /tmp (workers y pruebas temporales)."""
+    cwd = session.get("cwd") or ""
+    return cwd == "/tmp" or cwd.startswith("/tmp/")
+
+
+def list_sessions(roots=None, account=None, limit=None, keep=None):
     """Lee las sesiones. roots: lista de (cuenta, carpeta, comando).
 
     Lee los archivos del más reciente al más viejo (por mtime). Con limit, deja de leer
-    cuando tiene limit sesiones: así no lee todo el historial.
+    cuando tiene limit sesiones: así no lee todo el historial. keep(s) descarta sesiones
+    antes de contarlas para el límite.
     """
     files = []
     for name, root, cmd in roots or ACCOUNTS:
@@ -119,7 +127,7 @@ def list_sessions(roots=None, account=None, limit=None):
         if limit is not None and len(out) >= limit:
             break
         s = parse_session(path)
-        if s:
+        if s and (keep is None or keep(s)):
             s["account"] = name
             s["resume"] = resume_command(cmd, s)
             out.append(s)
@@ -160,13 +168,15 @@ def main(argv=None):
     p.add_argument("--cuenta", choices=[a[0] for a in ACCOUNTS])
     p.add_argument("-n", type=int, default=20, help="cantidad máxima (por defecto 20)")
     p.add_argument("-v", action="store_true", help="muestra el comando de resume")
+    p.add_argument("--todas", action="store_true", help="incluye las sesiones de /tmp")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
     here = os.getcwd() if a.aqui else None
+    keep = None if a.todas else (lambda s: not is_tmp(s))
     # Sin filtros basta leer las a.n sesiones más recientes. Con filtros hay que leer todas.
     limit = a.n if not (a.texto or here) else None
-    rows = select(list_sessions(account=a.cuenta, limit=limit), a.texto, here)[: a.n]
+    rows = select(list_sessions(account=a.cuenta, limit=limit, keep=keep), a.texto, here)[: a.n]
     if a.json:
         json.dump(rows, sys.stdout, ensure_ascii=False, indent=2)
         print()

@@ -14,7 +14,7 @@ sin otra aplicación en memoria. Solo Python 3 (biblioteca estándar).
 
 | Comando | Quién lo usa | Qué hace |
 |---|---|---|
-| `claude-sesiones [texto] [--aqui] [--cuenta david\|trabajo] [-n N] [-v] [--json]` | tú | Lista las sesiones de `~/.claude-david` y `~/.claude`. Con `-v`, muestra el comando de resume con la cuenta correcta. |
+| `claude-sesiones [texto] [--aqui] [--cuenta david\|trabajo] [-n N] [-v] [--todas] [--json]` | tú | Lista las sesiones de `~/.claude-david` y `~/.claude`. Oculta las de `/tmp` (workers y pruebas); `--todas` las muestra. Con `-v`, muestra el comando de resume con la cuenta correcta. |
 | `tty7-done --outcome succeeded\|failed --summary "..." [--base REF]` | worker | Escribe `.tty7-tareas/resultado.json`: resultado, rama, commit, archivos cambiados, `dirty`, `CLAUDE_CONFIG_DIR`. |
 | `tty7-ask "<pregunta>" [--options "a,b"]` | worker | Escribe `.tty7-tareas/pregunta.json`. El worker termina su turno después. |
 | `tty7-ask --show DIR` / `--close DIR --answer "..."` | coordinador | Muestra la pregunta abierta / la archiva en `.tty7-tareas/preguntas/` con la respuesta. |

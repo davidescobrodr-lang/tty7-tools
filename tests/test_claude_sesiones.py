@@ -137,6 +137,43 @@ class Minors(unittest.TestCase):
         self.assertEqual(run("claude-sesiones", "--json", env=env).stdout.strip(), "[]")
 
 
+class HideTmp(unittest.TestCase):
+    def setUp(self):
+        self.m = load("claude-sesiones")
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_is_tmp(self):
+        self.assertTrue(self.m.is_tmp({"cwd": "/tmp/x/wt1"}))
+        self.assertTrue(self.m.is_tmp({"cwd": "/tmp"}))
+        self.assertFalse(self.m.is_tmp({"cwd": "/tmpfoo/x"}))
+        self.assertFalse(self.m.is_tmp({"cwd": "/home/x"}))
+        self.assertFalse(self.m.is_tmp({"cwd": None}))
+
+    def test_limit_counts_only_visible(self):
+        root = Path(self.tmp.name)
+        keep = write_session(root, [user("real", cwd="/home/x")], sid="a" * 8)
+        hidden = write_session(root, [user("prueba", cwd="/tmp/w")], sid="b" * 8)
+        os.utime(keep, (1000, 1000))
+        os.utime(hidden, (2000, 2000))
+        rows = self.m.list_sessions(roots=[("david", root, "claude-david")], limit=1,
+                                    keep=lambda s: not self.m.is_tmp(s))
+        self.assertEqual([r["title"] for r in rows], ["real"])
+
+    def test_cli_hides_tmp_unless_todas(self):
+        proj = Path(self.tmp.name) / ".claude-david"
+        write_session(proj, [user("real", cwd="/home/x")], sid="a" * 8)
+        write_session(proj, [user("prueba", cwd="/tmp/w")], sid="b" * 8)
+        env = {"HOME": self.tmp.name}
+        out = run("claude-sesiones", env=env).stdout
+        self.assertIn("real", out)
+        self.assertNotIn("prueba", out)
+        out = run("claude-sesiones", "--todas", env=env).stdout
+        self.assertIn("prueba", out)
+
+
 class Select(unittest.TestCase):
     def setUp(self):
         self.m = load("claude-sesiones")
