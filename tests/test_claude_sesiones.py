@@ -1,9 +1,10 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import load
+from helpers import load, run
 
 SID = "11111111-2222-3333-4444-555555555555"
 
@@ -89,6 +90,51 @@ class ParseSession(unittest.TestCase):
         s = {"id": SID, "cwd": "/tmp/a b"}
         self.assertEqual(self.m.resume_command("claude-david", s),
                          f"cd '/tmp/a b' && claude-david --resume {SID}")
+
+
+class Minors(unittest.TestCase):
+    def setUp(self):
+        self.m = load("claude-sesiones")
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_real_prompt_starting_with_lt(self):
+        p = write_session(self.tmp.name, [
+            user("<system-reminder>x</system-reminder>"),
+            user("<div>arregla este html</div>"),
+        ])
+        self.assertEqual(self.m.parse_session(p)["title"], "<div>arregla este html</div>")
+
+    def test_known_wrappers_skipped(self):
+        for text in ("<command-name>/x</command-name>", "<local-command-stdout>x</local-command-stdout>",
+                     "<bash-input>ls</bash-input>", "<task-notification>x</task-notification>"):
+            p = write_session(self.tmp.name, [user(text), user("real")])
+            self.assertEqual(self.m.parse_session(p)["title"], "real", text)
+
+    def test_clean_removes_control_chars(self):
+        self.assertEqual(self.m.clean("a\x1b[31mrojo\x1b[0m\tb\nc\x07"), "a[31mrojo[0m b c")
+
+    def test_limit_reads_most_recent_files(self):
+        root = Path(self.tmp.name)
+        old = write_session(root, [user("vieja", ts="2026-01-01T00:00:00Z")], sid="a" * 8)
+        new = write_session(root, [user("nueva", ts="2026-01-02T00:00:00Z")], sid="b" * 8)
+        os.utime(old, (1000, 1000))
+        os.utime(new, (2000, 2000))
+        calls = []
+        real = self.m.parse_session
+        self.m.parse_session = lambda p: calls.append(p) or real(p)
+        rows = self.m.list_sessions(roots=[("david", root, "claude-david")], limit=1)
+        self.assertEqual([r["title"] for r in rows], ["nueva"])
+        self.assertEqual(len(calls), 1)
+
+    def test_no_sessions_exit_code(self):
+        env = {"HOME": self.tmp.name}
+        for args in ([], ["--json"]):
+            r = run("claude-sesiones", *args, env=env)
+            self.assertEqual(r.returncode, 1, args)
+        self.assertEqual(run("claude-sesiones", "--json", env=env).stdout.strip(), "[]")
 
 
 class Select(unittest.TestCase):
