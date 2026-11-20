@@ -35,5 +35,3 @@ La regla completa está en `~/.claude-david/CLAUDE.md` ("Subagentes de superpowe
 ```bash
 python3 -m unittest discover -s tests
 ```
-
-`docs/` tiene el diseño y el plan.
