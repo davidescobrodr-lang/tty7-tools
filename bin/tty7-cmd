@@ -3,6 +3,7 @@
 
 Uso: tty7-cmd [--timeout S] [--cwd DIR] [--] <comando...>
      tty7-cmd --close
+     tty7-cmd --pane     (imprime el pane de comandos si está vivo; código 1 si no hay)
 
 El pane de comandos está a la derecha de tu pane ($TTY7_PANE). Si el pane ya existe y está vivo,
 tty7-cmd lo reusa. Si no, abre uno (tty7 split --h) y espera a que el shell responda.
@@ -107,6 +108,8 @@ def main(argv=None):
     p.add_argument("--timeout", type=int, default=600, help="segundos (por defecto 600)")
     p.add_argument("--cwd", help="directorio del comando (por defecto el actual)")
     p.add_argument("--close", action="store_true", help="cierra el pane de comandos")
+    p.add_argument("--pane", action="store_true",
+                   help="imprime el pane de comandos si está vivo (código 1 si no hay; no abre uno)")
     p.add_argument("command", nargs=argparse.REMAINDER)
     a = p.parse_args(argv)
 
@@ -118,6 +121,12 @@ def main(argv=None):
     owner = pane_id(owner)
     if a.close:
         return close(owner)
+    if a.pane:
+        saved = read_saved(state_dir() / owner.lstrip("%"))
+        if saved and is_live(saved):
+            print(saved)
+            return 0
+        return 1
 
     words = a.command[1:] if a.command[:1] == ["--"] else a.command
     if not words:

@@ -19,7 +19,7 @@ sin otra aplicación en memoria. Solo Python 3 (biblioteca estándar).
 | `tty7-ask "<pregunta>" [--options "a,b"]` | worker | Escribe `.tty7-tareas/pregunta.json`. El worker termina su turno después. |
 | `tty7-ask --show DIR` / `--close DIR --answer "..."` | coordinador | Muestra la pregunta abierta / la archiva en `.tty7-tareas/preguntas/` con la respuesta. |
 | `tty7-trust DIR` / `tty7-trust --remove DIR` | coordinador | Marca DIR como confiable en `~/.claude-david/.claude.json` (`--config-dir` cambia la cuenta). Así `claude-david` no muestra el diálogo de confianza. Usa la raíz de cada worktree. |
-| `tty7-cmd [--timeout S] [--cwd DIR] '<comando>'` / `tty7-cmd --close` | agente | Ejecuta el comando en un pane de comandos visible, a la derecha de `$TTY7_PANE`, y devuelve la salida y el código de salida. Reusa el pane si está vivo. Si no, abre uno. No sirve para comandos interactivos ni servidores. |
+| `tty7-cmd [--timeout S] [--cwd DIR] '<comando>'` / `--close` / `--pane` | agente | Ejecuta el comando en un pane de comandos visible, a la derecha de `$TTY7_PANE`, y devuelve la salida y el código de salida. Reusa el pane si está vivo. Si no, abre uno. `--pane` imprime su id sin abrir uno. No sirve para comandos interactivos ni servidores. |
 | `tty7-run new\|add\|set\|show\|ls` | coordinador | Registro de corridas en `~/.local/state/tty7-runs/` (o `$TTY7_RUNS_DIR`). Estados: `pendiente`, `trabajando`, `pregunta`, `terminada`, `fallida`, `cerrada`. |
 
 ## Flujo

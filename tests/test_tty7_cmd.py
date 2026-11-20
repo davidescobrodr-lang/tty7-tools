@@ -154,6 +154,18 @@ class Tty7Cmd(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("TTY7_PANE", r.stderr)
 
+    def test_pane_option(self):
+        r = self.cmd("--pane")
+        self.assertEqual((r.returncode, r.stdout), (1, ""))  # sin pane: no abre uno
+        self.assertFalse(any(c[0] == "split" for c in self.fake()["calls"]))
+        self.cmd("ls")
+        r = self.cmd("--pane")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "%200"))
+        d = self.fake()
+        d["panes"] = [101]
+        self.save(d)
+        self.assertEqual(self.cmd("--pane").returncode, 1)
+
     def test_needs_command(self):
         r = self.cmd()
         self.assertEqual(r.returncode, 2)
