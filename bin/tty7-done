@@ -30,10 +30,14 @@ def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def read_base(arg):
@@ -53,12 +57,16 @@ def collect(base):
         diff = git("diff", "--name-only", f"{base}...HEAD")
     else:
         diff = git("diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "HEAD")
+    if diff is None:
+        # git falló (base inválida, repo sin commits): "sin datos" no es "sin cambios".
+        print(f"aviso: no pude calcular los archivos cambiados desde {base or 'HEAD'}.",
+              file=sys.stderr)
     status = git("status", "--porcelain", "--", ".", f":(exclude){TAREAS}") or ""
     return {
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
         "commit": git("rev-parse", "HEAD"),
         "base": base,
-        "files_changed": [l for l in (diff or "").splitlines() if l],
+        "files_changed": None if diff is None else [l for l in diff.splitlines() if l],
         "dirty": bool(status.strip()),
     }
 

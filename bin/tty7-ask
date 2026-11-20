@@ -22,10 +22,14 @@ def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def question_path(base):
@@ -56,12 +60,26 @@ def ask(question, options):
     return 0
 
 
+def read_question(path):
+    """Lee la pregunta. Devuelve None (con un error en stderr) si el JSON está dañado."""
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(d, dict) and "question" in d:
+            return d
+    except (OSError, ValueError):
+        pass
+    print(f"error: {path} no es un JSON de pregunta válido. Revísalo a mano.", file=sys.stderr)
+    return None
+
+
 def show(base):
     path = question_path(base)
     if not path.exists():
         print("Sin pregunta abierta.")
         return 1
-    d = json.loads(path.read_text(encoding="utf-8"))
+    d = read_question(path)
+    if d is None:
+        return 2
     print(d["question"])
     if d.get("options"):
         print("Opciones: " + ", ".join(d["options"]))
@@ -73,7 +91,9 @@ def close(base, answer):
     if not path.exists():
         print(f"error: Sin pregunta abierta en {Path(base).resolve()}", file=sys.stderr)
         return 2
-    d = json.loads(path.read_text(encoding="utf-8"))
+    d = read_question(path)
+    if d is None:
+        return 2
     d["answer"] = answer
     d["answered"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     stamp = d.get("time", d["answered"]).replace(":", "")

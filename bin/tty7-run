@@ -10,11 +10,13 @@
 <run> acepta un prefijo único del id. Datos: $TTY7_RUNS_DIR o ~/.local/state/tty7-runs/
 """
 import argparse
+import fcntl
 import json
 import os
 import re
 import sys
 import tempfile
+import unicodedata
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,14 +42,19 @@ def write_json(path, data):
     """Escritura atómica: temporal en el mismo directorio + os.replace."""
     path = Path(path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def slug(text):
-    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
     return s[:30].strip("-") or "corrida"
 
 
@@ -73,7 +80,14 @@ def resolve(prefix):
 
 
 def load(run_id):
-    return json.loads((runs_dir() / f"{run_id}.json").read_text(encoding="utf-8"))
+    path = runs_dir() / f"{run_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("tasks"), dict):
+        raise Error(f"{path} no es un JSON de corrida válido. Revísalo a mano.")
+    return data
 
 
 def save(data):
@@ -134,7 +148,11 @@ def cmd_ls(a):
         print("Sin corridas.")
         return 1
     for run_id in ids:
-        data = load(run_id)
+        try:
+            data = load(run_id)
+        except Error as e:
+            print(f"aviso: {e}", file=sys.stderr)
+            continue
         counts = Counter(t["status"] for t in data["tasks"].values())
         summary = ", ".join(f"{s}: {counts[s]}" for s in STATUSES if counts[s]) or "sin tareas"
         print(f"{run_id}  {data['objective']}  ({summary})")
@@ -168,7 +186,10 @@ def main(argv=None):
     s.set_defaults(fn=cmd_ls)
     a = p.parse_args(argv)
     try:
-        return a.fn(a) or 0
+        # Un bloqueo por directorio: dos llamadas en paralelo no pierden una actualización.
+        with open(runs_dir() / ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return a.fn(a) or 0
     except Error as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
